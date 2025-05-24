@@ -5,12 +5,12 @@ import java.util.Hashtable;
 
 /**
  * Синтаксический анализатор языка Милан.
- *
+ * <p>
  * Парсер с помощью переданного ему при инициализации лексического
  * анализатора читает по одной лексеме и на основе грамматики
  * Милана генерирует код для стековой виртуальной машины.
  * Синтаксический анализ выполняется методом рекурсивного спуска.
- *
+ * <p>
  * При обнаружении ошибки парсер печатает сообщение и продолжает анализ
  * со следующего оператора, чтобы в процессе разбора найти как можно больше
  * ошибок. Поскольку стратегия восстановления после ошибки очень проста,
@@ -18,19 +18,17 @@ import java.util.Hashtable;
  * или пропуск некоторых ошибок без печати сообщений.
  * Если в процессе разбора была найдена хотя бы одна ошибка,
  * код для виртуальной машины не печатается.
- *
  */
 
 public class Parser {
+
     /**
      * Конструктор создает парсер, который использует переданный в качестве
      * параметра конструктора лексический анализатор.
      *
-     * @param scanner
-     *                лексический анализатор, возвращающий очередную
+     * @param scanner лексический анализатор, возвращающий очередную
      *                лексему из потока.
-     * @param output
-     *                выходной поток, куда будет напечатан код для
+     * @param output  выходной поток, куда будет напечатан код для
      *                виртуальной машины.
      */
     public Parser(Scanner scanner, PrintStream output) {
@@ -50,7 +48,7 @@ public class Parser {
     public void parse() {
         program();
         mustBe(Token.EOF);
-        if(!this.error) {
+        if (!this.error) {
             this.emitter.flush();
         }
     }
@@ -72,8 +70,8 @@ public class Parser {
      * Разбор списка операторов.
      *
      * @return Объект класса Block, содержащий синтаксическое дерево
-     *         списка операторов (список синтаксических деревьев
-     *         операторов или null, если список операторов пуст).
+     * списка операторов (список синтаксических деревьев
+     * операторов или null, если список операторов пуст).
      */
 
     private void statementList() {
@@ -95,12 +93,11 @@ public class Parser {
          * отсутствие после оператора точки с запятой.
          */
 
-        if(see(Token.END) || see(Token.OD) || see(Token.ELSE) || see(Token.FI)) {
+        if (see(Token.END) || see(Token.OD) || see(Token.ELSE) || see(Token.FI)) {
             return; // Список операторов пуст
-        }
-        else {
+        } else {
             boolean more = true;
-            while(more) {
+            while (more) {
                 statement();
                 more = match(Token.SEMICOLON);
             }
@@ -109,7 +106,6 @@ public class Parser {
 
     /**
      * Разбор оператора.
-     *
      */
 
     private void statement() {
@@ -131,7 +127,7 @@ public class Parser {
          * формируется сообщение об ошибке.
          */
 
-        if(match(Token.IDENTIFIER)) {
+        if (match(Token.IDENTIFIER)) {
             // Запомним адрес переменной, соответствующей прочитанному
             // идентификатору.
             int var = getVariableAddress(input.stringValue());
@@ -143,8 +139,113 @@ public class Parser {
             // памяти, адрес которой соответствует идентификатору
             // в левой части оператора присваивания.
             emitter.emit(CodeEmitter.Opcode.STORE, var);
-        }
-        else if(match(Token.IF)) {
+        } else if (match(Token.FOR)) {
+            if (!match(Token.IDENTIFIER)) {
+                reportError("Expected loop variable after 'for'.");
+                return;
+            }
+
+            int loopVarAddr = getVariableAddress(input.stringValue());
+
+            // Проверяем, используется ли синтаксис с 'in'
+            if (match(Token.IN)) {
+                // Обработка интервального типа: <start>..<end>
+                expression(); // Начало интервала
+                int startValueAddr = getTempVar();
+                emitter.emit(CodeEmitter.Opcode.STORE, startValueAddr);
+
+                mustBe(Token.DOTDOT); // Требуем '..'
+
+                expression(); // Конец интервала
+                int endAddr = getTempVar();
+                emitter.emit(CodeEmitter.Opcode.STORE, endAddr);
+
+                // Сохраняем начальное значение в переменную цикла
+                emitter.emit(CodeEmitter.Opcode.LOAD, startValueAddr);
+                emitter.emit(CodeEmitter.Opcode.STORE, loopVarAddr);
+
+                // Шаг по умолчанию = 1
+                int stepAddr = getTempVar();
+                emitter.emit(CodeEmitter.Opcode.PUSH, 1);
+                emitter.emit(CodeEmitter.Opcode.STORE, stepAddr);
+
+                int loopStart = emitter.getCurrentAddress();
+
+                // Проверка условия: loopVar <= endAddr
+                emitter.emit(CodeEmitter.Opcode.LOAD, loopVarAddr);
+                emitter.emit(CodeEmitter.Opcode.LOAD, endAddr);
+                emitter.emit(CodeEmitter.Opcode.COMPARE, 4);
+
+                int jumpExitAddr = emitter.getCurrentAddress();
+                emitter.emit(CodeEmitter.Opcode.JUMP_NO, 0);
+
+                mustBe(Token.DO);
+                statementList();
+                mustBe(Token.OD);
+
+                // Увеличиваем переменную на шаг (1)
+                emitter.emit(CodeEmitter.Opcode.LOAD, loopVarAddr);
+                emitter.emit(CodeEmitter.Opcode.LOAD, stepAddr);
+                emitter.emit(CodeEmitter.Opcode.ADD);
+                emitter.emit(CodeEmitter.Opcode.STORE, loopVarAddr);
+                emitter.emit(CodeEmitter.Opcode.JUMP, loopStart);
+                emitter.emitAt(jumpExitAddr, CodeEmitter.Opcode.JUMP_NO, emitter.getCurrentAddress());
+
+            } else if (match(Token.ASSIGN)) {
+                //  Синтаксис: for i := 1 to N step K do ... od
+                expression(); // Начальное значение
+                emitter.emit(CodeEmitter.Opcode.STORE, loopVarAddr);
+
+                if (!match(Token.TO)) {
+                    reportError("Expected 'to' after for assignment.");
+                    return;
+                }
+
+                expression(); // Конечное значение
+                int endAddr = getTempVar();
+                emitter.emit(CodeEmitter.Opcode.STORE, endAddr);
+
+                if (!match(Token.STEP)) {
+                    reportError("Expected 'step' after 'to'.");
+                    return;
+                }
+
+                expression(); // Шаг
+                int stepAddr = getTempVar();
+                emitter.emit(CodeEmitter.Opcode.STORE, stepAddr);
+
+                if (!match(Token.DO)) {
+                    reportError("Expected 'do' after step.");
+                    return;
+                }
+
+                int loopStart = emitter.getCurrentAddress();
+
+                // Проверка: если loopVar > endAddr, выходим
+                emitter.emit(CodeEmitter.Opcode.LOAD, loopVarAddr);
+                emitter.emit(CodeEmitter.Opcode.LOAD, endAddr);
+                emitter.emit(CodeEmitter.Opcode.COMPARE, 3);
+
+                int jumpExitAddr = emitter.getCurrentAddress();
+                emitter.emit(CodeEmitter.Opcode.JUMP_YES, 0);
+
+                statementList();
+                mustBe(Token.OD);
+
+                // Увеличиваем переменную на шаг
+                emitter.emit(CodeEmitter.Opcode.LOAD, loopVarAddr);
+                emitter.emit(CodeEmitter.Opcode.LOAD, stepAddr);
+                emitter.emit(CodeEmitter.Opcode.ADD);
+                emitter.emit(CodeEmitter.Opcode.STORE, loopVarAddr);
+
+                emitter.emit(CodeEmitter.Opcode.JUMP, loopStart);
+
+                int loopEnd = emitter.getCurrentAddress();
+                emitter.emitAt(jumpExitAddr, CodeEmitter.Opcode.JUMP_YES, loopEnd);
+            } else {
+                reportError("Expected 'in' or ':=' after loop variable.");
+            }
+        } else if (match(Token.IF)) {
             relationalExpression();
 
             // Код: зарезервируем инструкцию для условного перехода
@@ -158,7 +259,7 @@ public class Parser {
 
             mustBe(Token.THEN);
             statementList();
-            if(match(Token.ELSE)) {
+            if (match(Token.ELSE)) {
                 // Код: в условном операторе есть блок ELSE. Чтобы не попасть
                 // в него после исполнения блока THEN, зарезервируем
                 // место для безусловного перехода в конец блока ELSE.
@@ -167,22 +268,20 @@ public class Parser {
                 // Код: теперь известен адрес начала блока ELSE, заполним
                 // зарезервированное место после проверки условия инструкцией
                 // перехода.
-                
+
                 emitter.emitAt(jump_no, CodeEmitter.Opcode.JUMP_NO, emitter.getCurrentAddress());
                 statementList();
 
                 // Код: сформируем по второму зарезервированному адресу
                 // инструкцию безусловного перехода в конец условного оператора.
                 emitter.emitAt(jump, CodeEmitter.Opcode.JUMP, emitter.getCurrentAddress());
-            }
-            else {
+            } else {
                 // Код: блока ELSE нет. Запишем по зарезервированному адресу
                 // инструкцию условного перехода в конец условного оператора.
                 emitter.emitAt(jump_no, CodeEmitter.Opcode.JUMP_NO, emitter.getCurrentAddress());
             }
             mustBe(Token.FI);
-        }
-        else if(match(Token.WHILE)) {
+        } else if (match(Token.WHILE)) {
             // Код: запомним адрес начала проверки условия, сюда надо будет
             // возвращаться после каждого исполнения тела цикла.
             int cond = emitter.getCurrentAddress();
@@ -202,18 +301,22 @@ public class Parser {
             // Код: запишем по зарезервированному адресу инструкцию
             // условного перехода на следующий за циклом оператор.
             emitter.emitAt(jump_no, CodeEmitter.Opcode.JUMP_NO, emitter.getCurrentAddress());
-        }
-        else if(match(Token.WRITE)) {
+        } else if (match(Token.WRITE)) {
             mustBe(Token.LPAREN);
             expression();
             mustBe(Token.RPAREN);
             emitter.emit(CodeEmitter.Opcode.PRINT);
-        }
-        else {
+        } else {
             this.error = true;
             reportError("Statement expected, but %s found.",
                     input.token().toString());
         }
+    }
+
+    private int tempVarCounter = 1000;
+
+    private int getTempVar() {
+        return tempVarCounter++;
     }
 
     /**
@@ -237,19 +340,17 @@ public class Parser {
          */
 
         term();
-        while(more) {
-            if(match(Token.ADDOP)) {
+        while (more) {
+            if (match(Token.ADDOP)) {
                 Arithmetic op = input.arithmeticValue();
                 term();
 
-                if(op == Arithmetic.PLUS) {
+                if (op == Arithmetic.PLUS) {
                     emitter.emit(CodeEmitter.Opcode.ADD);
-                }
-                else {
+                } else {
                     emitter.emit(CodeEmitter.Opcode.SUB);
                 }
-            }
-            else {
+            } else {
                 more = false;
             }
         }
@@ -259,43 +360,36 @@ public class Parser {
         boolean more = true;
 
         factor();
-        while(more) {
-            if(match(Token.MULOP)) {
+        while (more) {
+            if (match(Token.MULOP)) {
                 Arithmetic op = input.arithmeticValue();
                 factor();
 
-                if(op == Arithmetic.MULTIPLY) {
+                if (op == Arithmetic.MULTIPLY) {
                     emitter.emit(CodeEmitter.Opcode.MULT);
-                }
-                else {
+                } else {
                     emitter.emit(CodeEmitter.Opcode.DIV);
                 }
-            }
-            else {
+            } else {
                 more = false;
             }
         }
     }
 
     private void factor() {
-        if(match(Token.IDENTIFIER)) {
+        if (match(Token.IDENTIFIER)) {
             emitter.emit(CodeEmitter.Opcode.LOAD, getVariableAddress(this.input.stringValue()));
-        }
-        else if(match(Token.NUMBER)) {
+        } else if (match(Token.NUMBER)) {
             emitter.emit(CodeEmitter.Opcode.PUSH, this.input.intValue());
-        }
-        else if(match(Token.READ)) {
+        } else if (match(Token.READ)) {
             emitter.emit(CodeEmitter.Opcode.INPUT);
-        }
-        else if(match(Token.LPAREN)) {
+        } else if (match(Token.LPAREN)) {
             expression();
             mustBe(Token.RPAREN);
-        }
-        else if(match(Token.ADDOP) && input.arithmeticValue() == Arithmetic.MINUS) {
+        } else if (match(Token.ADDOP) && input.arithmeticValue() == Arithmetic.MINUS) {
             factor();
             emitter.emit(CodeEmitter.Opcode.INVERT);
-        }
-        else {
+        } else {
             this.error = true;
             reportError("Expected identifier, number, READ, '(' or unary minus, but %s found.",
                     input.token().toString());
@@ -304,12 +398,11 @@ public class Parser {
 
     private void relationalExpression() {
         expression();
-        if(match(Token.CMP)) {
+        if (match(Token.CMP)) {
             expression();
             emitter.emit(CodeEmitter.Opcode.COMPARE,
                     emitter.relationCode(input.cmpValue()));
-        }
-        else {
+        } else {
             this.error = true;
             reportError("Relational operator required, but %s found.",
                     input.token());
@@ -322,7 +415,7 @@ public class Parser {
      *
      * @param tok Образец
      * @return true, если очередная лексема совпадает с образцом,
-     *         false в противном случае.
+     * false в противном случае.
      */
 
     private boolean see(Token tok) {
@@ -335,16 +428,15 @@ public class Parser {
      *
      * @param tok Образец
      * @return true, если очередная лексема совпала с образцом (лексема
-     *         при этом удаляется из потока),
-     *         false в противном случае.
+     * при этом удаляется из потока),
+     * false в противном случае.
      */
 
     private boolean match(Token tok) {
-        if(input.token() == tok) {
+        if (input.token() == tok) {
             input.nextToken();
             return true;
-        }
-        else {
+        } else {
             return false;
         }
     }
@@ -352,32 +444,30 @@ public class Parser {
     /**
      * Сравнение очередной лексемы с образцом и генерация сообщения об ошибке
      * в случае несовпадения.
-     *
+     * <p>
      * Метод предназначен для проверки наличия в потоке "обязательной"
      * лексемы, отсутствие которой означает нарушение правил грамматики.
      *
      * @param tok Образец.
      */
     private void mustBe(Token tok) {
-        if(input.token() == tok) {
+        if (input.token() == tok) {
             input.nextToken();
             isRecovered = true;
-        }
-        else {
+        } else {
             this.error = true;
 
-            if(isRecovered) {
-            isRecovered = false;
-            this.error = true;
-            reportError("%s found while %s is expected.",
-                    input.token().toString(), tok.toString());
-            }
-            else {
-                while(input.token() != tok && input.token() != Token.EOF) {
+            if (isRecovered) {
+                isRecovered = false;
+                this.error = true;
+                reportError("%s found while %s is expected.",
+                        input.token().toString(), tok.toString());
+            } else {
+                while (input.token() != tok && input.token() != Token.EOF) {
                     input.nextToken();
                 }
 
-                if(input.token() == tok) {
+                if (input.token() == tok) {
                     input.nextToken();
                     isRecovered = true;
                 }
@@ -392,14 +482,14 @@ public class Parser {
     }
 
     private int getVariableAddress(String name) {
-        if(variables.containsKey(name)) {
+        if (variables.containsKey(name)) {
             return variables.get(name).intValue();
-        }
-        else {
+        } else {
             variables.put(name, Integer.valueOf(nextVariableAddress));
             return nextVariableAddress++;
         }
     }
+
 
     private Scanner input; // Объект лексического анализатора
     private CodeEmitter emitter; // Объект кодогенератора

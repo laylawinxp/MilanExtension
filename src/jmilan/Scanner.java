@@ -1,14 +1,14 @@
 package jmilan;
 
-import java.io.LineNumberReader;
-import java.io.FileReader;
 import java.io.FileNotFoundException;
+import java.io.FileReader;
 import java.io.IOException;
+import java.io.LineNumberReader;
 import java.util.Hashtable;
 
 public class Scanner {
     public static final char EOF = (char) -1;
-    
+
     public Scanner(String fileName) throws FileNotFoundException {
         this.fileName = fileName;
         this.input = new LineNumberReader(new FileReader(fileName));
@@ -26,8 +26,12 @@ public class Scanner {
         this.keywords.put("od", Token.OD);
         this.keywords.put("write", Token.WRITE);
         this.keywords.put("read", Token.READ);
+        this.keywords.put("for", Token.FOR);
+        this.keywords.put("to", Token.TO);
+        this.keywords.put("step", Token.STEP);
+        this.keywords.put("in", Token.IN);
 
-        nextChar();       
+        nextChar();
     }
 
     public void close() throws IOException {
@@ -66,24 +70,23 @@ public class Scanner {
         skipSpaces();
 
         // Пропускаем комментарии
-        if(ch == '/') {
+        if (ch == '/') {
             nextChar();
-            if(ch == '*') {
+            if (ch == '*') {
                 nextChar();
                 boolean inside = true;
-                while(inside) {
-                    while(ch != '*') {
+                while (inside) {
+                    while (ch != '*') {
                         nextChar();
                     }
 
                     nextChar();
-                    if(ch == '/') {
+                    if (ch == '/') {
                         inside = false;
                         nextChar();
                     }
                 }
-            }
-            else {
+            } else {
                 token = Token.MULOP;
                 this.arithval = Arithmetic.DIVIDE;
                 return;
@@ -92,33 +95,30 @@ public class Scanner {
 
         skipSpaces();
 
-        if(isDigit(ch)) {
+        if (isDigit(ch)) {
             int value = 0;
-            while(isDigit(ch)) {
+            while (isDigit(ch)) {
                 value = value * 10 + (ch - '0');
                 nextChar();
             }
 
             token = Token.NUMBER;
             intval = value;
-        }
-        else if(isIdentifierStart(ch)) {
+        } else if (isIdentifierStart(ch)) {
             StringBuffer buffer = new StringBuffer();
-            while(isIdentifierBody(ch)) {
+            while (isIdentifierBody(ch)) {
                 buffer.append(ch);
                 nextChar();
             }
 
             String identifier = buffer.toString().toLowerCase();
-            if(keywords.containsKey(identifier)) {
+            if (keywords.containsKey(identifier)) {
                 token = keywords.get(identifier);
-            }
-            else {
+            } else {
                 token = Token.IDENTIFIER;
                 strval = identifier;
             }
-        }
-        else {
+        } else {
             switch (ch) {
                 case '(':
                     nextChar();
@@ -215,7 +215,18 @@ public class Scanner {
                 case EOF:
                     token = Token.EOF;
                     break;
-                    
+
+                case '.':
+                    nextChar();
+                    if (ch == '.') {
+                        nextChar();
+                        token = Token.DOTDOT;
+                    } else {
+                        reportError("'..' expected, but '.' found");
+                        token = Token.ILLEGAL;
+                    }
+                    break;
+
                 default:
                     reportError("'%c': illegal character", ch);
                     nextChar();
@@ -225,9 +236,9 @@ public class Scanner {
     }
 
     private void skipSpaces() {
-        while(isSpace(ch)) {
+        while (isSpace(ch)) {
             nextChar();
-        }   
+        }
     }
 
     private boolean isSpace(char c) {
@@ -250,8 +261,7 @@ public class Scanner {
     private void nextChar() {
         try {
             ch = (char) input.read();
-        }
-        catch(IOException e) {
+        } catch (IOException e) {
             reportError("Unable to read character");
         }
     }

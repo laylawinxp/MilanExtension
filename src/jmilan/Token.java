@@ -1,6 +1,11 @@
 package jmilan;
 
 public enum Token {
+    FOR,
+    TO,
+    STEP,
+    IN,
+    DOTDOT,
     EOF,        // Признак конца файла
     ILLEGAL,    // Признак недопустимого символа
     IDENTIFIER, // Идентификатор

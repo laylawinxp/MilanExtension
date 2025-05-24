@@ -135,7 +135,7 @@ public class CodeEmitter {
         for(addr = 0; addr < buffer.size(); ++addr) {
             buffer.get(addr).print(stream, addr);
         }
-        
+
         stream.flush();
     }
 
